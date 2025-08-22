@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Realtime Captions",
+  "version": "1.0",
+  "permissions": ["activeTab", "tabs", "scripting","tabCapture"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["style.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
