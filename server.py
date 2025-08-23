@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask import Flask, jsonify
 import queue
 import threading
+import time
 from test import start_transcription, caption_queue  # import from your test.py
 
 app = Flask(__name__)
@@ -35,15 +36,26 @@ def webhook_caption():
 @app.route("/stream_caption")
 def stream_caption():
     def event_stream():
-        while True:
-            if not caption_queue.empty():
-                caption = caption_queue.get()
-                yield f"data: {caption}\n\n"
+        try:
+            while True:
+                if not caption_queue.empty():
+                    caption = caption_queue.get()
+                    yield f"data: {caption}\n\n"
+                else:
+                    # Send a keepalive ping every 15 seconds
+                    yield f"data: \n\n"
+                time.sleep(0.1)  # Small delay to prevent busy waiting
+        except GeneratorExit:
+            print("Client disconnected from SSE")
+        except Exception as e:
+            print(f"Error in event stream: {e}")
+            
     response = Response(event_stream(), mimetype="text/event-stream")
     response.headers["Cache-Control"] = "no-cache"
     response.headers["Connection"] = "keep-alive"
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["X-Accel-Buffering"] = "no"  # Disable proxy buffering
     return response
 
 if __name__ == "__main__":

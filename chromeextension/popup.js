@@ -65,13 +65,37 @@ function cleanup() {
     console.log('Cleanup completed');
 }
 
-// Start button handler for captions
-document.getElementById("startBtn").onclick = () => {
-    if (eventSource) return; // already running
+// Function to start EventSource with reconnection logic
+function startEventSource() {
+    if (eventSource) {
+        eventSource.close();
+    }
+    
     eventSource = new EventSource("http://127.0.0.1:5000/stream_caption");
+    let lastMessageTime = Date.now();
+    let reconnectAttempt = 0;
+    const maxReconnectAttempts = 5;
+    
+    // Check for stale connection every 5 seconds
+    const healthCheck = setInterval(() => {
+        if (Date.now() - lastMessageTime > 10000) { // 10 seconds without messages
+            console.log("Connection appears stale, reconnecting...");
+            eventSource.close();
+            if (reconnectAttempt < maxReconnectAttempts) {
+                reconnectAttempt++;
+                startEventSource();
+            }
+        }
+    }, 5000);
+
     eventSource.onmessage = function(event) {
+        lastMessageTime = Date.now();
+        reconnectAttempt = 0;
+        
         if (!event.data) return;
         chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            if (!tabs || !tabs[0]) return;
+            
             chrome.scripting.executeScript({
                 target: {tabId: tabs[0].id},
                 func: (text) => {
@@ -96,15 +120,35 @@ document.getElementById("startBtn").onclick = () => {
                         });
                         document.body.appendChild(overlay);
                     }
-                    overlay.textContent = text;
+                    overlay.textContent = text || "...";
                 },
                 args: [event.data]
             });
         });
     };
+
     eventSource.onerror = function(err) {
         console.log("SSE error:", err);
+        if (reconnectAttempt < maxReconnectAttempts) {
+            reconnectAttempt++;
+            setTimeout(() => {
+                console.log(`Reconnection attempt ${reconnectAttempt}...`);
+                startEventSource();
+            }, 1000 * reconnectAttempt); // Exponential backoff
+        }
     };
+
+    eventSource.onopen = function() {
+        console.log("SSE connection opened");
+        reconnectAttempt = 0;
+    };
+
+    return healthCheck;
+}
+
+// Start button handler for captions
+document.getElementById("startBtn").onclick = () => {
+    const healthCheck = startEventSource();
 };
 
 // Stop button handler
@@ -113,8 +157,13 @@ document.getElementById("stopBtn").onclick = () => {
         eventSource.close();
         eventSource = null;
     }
+    if (window.healthCheck) {
+        clearInterval(window.healthCheck);
+        window.healthCheck = null;
+    }
     cleanup();
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+        if (!tabs || !tabs[0]) return;
         chrome.scripting.executeScript({
             target: {tabId: tabs[0].id},
             func: () => {
